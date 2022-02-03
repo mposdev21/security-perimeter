@@ -1,0 +1,79 @@
+*filter
+:INPUT DROP [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+
+# Accept all packets from LAN. You can make it more
+# fine grained and only accept DNS, SSH, HTTP etc.
+
+-A INPUT -i eth1 -j ACCEPT
+
+
+# Rules to forward port 443 and 53 to pihole
+# * Public Interface: eth2
+# * Private Interface: eth1
+-A FORWARD -i eth2 -o eth1 -p tcp --syn --dport 443 -m conntrack --ctstate NEW -j ACCEPT
+-A FORWARD -i eth2 -o eth1 -p tcp --syn --dport 53 -m conntrack --ctstate NEW -j ACCEPT
+-A FORWARD -i eth2 -o eth1 -p udp --dport 53 -m conntrack --ctstate NEW -j ACCEPT
+
+
+# forward packets along established/related connections
+-A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+# forward from LAN (eth2) to WAN (eth5)
+-A FORWARD -i eth1 -o eth2 -j ACCEPT
+
+-A FORWARD -j DROP
+# End of Forward filtering rules
+
+# Commit the changes
+
+COMMIT
+
+*raw
+:PREROUTING ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+COMMIT
+
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+
+# Rules to translate requests for port 443,53 of the public interface
+# so that we can forward correctly to the pihole using the
+# private interface.
+
+-A PREROUTING -t nat -i eth2 -p tcp --dport 443 -j DNAT --to-destination 192.168.100.1
+-A PREROUTING -t nat -i eth2 -p tcp --dport 53 -j DNAT --to-destination 192.168.100.1
+-A PREROUTING -t nat -i eth2 -p udp --dport 53 -j DNAT --to-destination 192.168.100.1
+
+# The previous rule will alter the destination address to the private side. But the
+# source is still pointing to the original client address. We don't know how to route
+# to that address. Use the address on eth5 for the source address to be NATed to.
+
+-A POSTROUTING -t nat -d 192.168.100.1 -o eth1 -p tcp --dport 443 -j SNAT --to-source 10.0.0.127
+-A POSTROUTING -t nat -d 192.168.100.1 -o eth1 -p tcp --dport 53 -j SNAT --to-source 10.0.0.127
+-A POSTROUTING -t nat -d 192.168.100.1 -o eth1 -p udp --dport 53 -j SNAT --to-source 10.0.0.127
+
+# End of NAT translations for web server traffic
+
+# eth5 is WAN interface, #eth1 is LAN interface
+-A POSTROUTING -o eth2 -j MASQUERADE
+
+COMMIT
+
+*security
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+COMMIT
+
+*mangle
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+COMMIT
